@@ -1,19 +1,55 @@
+use std::num::ParseIntError;
+use std::vec::Drain;
+
+trait FromStrRadix<T> {
+  fn from_str_radix(src: &str, radix: u32) -> Result<T, ParseIntError>;
+}
+
+impl FromStrRadix<usize> for usize {
+  fn from_str_radix(src: &str, radix: u32) -> Result<usize, ParseIntError> {
+    usize::from_str_radix(src, radix)
+  }
+}
+
+impl FromStrRadix<u8> for u8 {
+  fn from_str_radix(src: &str, radix: u32) -> Result<u8, ParseIntError> {
+    u8::from_str_radix(src, radix)
+  }
+}
+
+impl FromStrRadix<u16> for u16 {
+  fn from_str_radix(src: &str, radix: u32) -> Result<u16, ParseIntError> {
+    u16::from_str_radix(src, radix)
+  }
+}
+
+impl FromStrRadix<u64> for u64 {
+  fn from_str_radix(src: &str, radix: u32) -> Result<u64, ParseIntError> {
+    u64::from_str_radix(src, radix)
+  }
+}
+
 #[derive(Debug)]
-struct Packet {
+pub struct Packet {
   version: u8,
   type_id: u8,
-  value: Option<u32>,
+  value: Option<u64>,
   sub_packets: Option<Vec<Packet>>,
 }
 
-fn drain_rest(bit_vec: &mut Vec<char>, len: usize) {
-  bit_vec.drain(0..(4 - len % 4));
+fn number_from_drain<T: FromStrRadix<T>>(drain: &mut Drain<char>) -> T {
+  T::from_str_radix(&drain.collect::<String>(), 2).unwrap()
 }
 
-fn parse_next_packet(bit_vec: &mut Vec<char>) -> Option<Packet> {
+fn number_from_vec<T: FromStrRadix<T>>(vec: &Vec<char>) -> T {
+  T::from_str_radix(&vec.into_iter().collect::<String>(), 2).unwrap()
+}
+
+fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'static str> {
+  //println!("{:?}", bit_vec);
   let mut len = 6;
-  let version = u8::from_str_radix(&bit_vec.drain(0..3).collect::<String>(), 2).unwrap();
-  let p_type = u8::from_str_radix(&bit_vec.drain(0..3).collect::<String>(), 2).unwrap();
+  let version = number_from_drain::<u8>(&mut bit_vec.drain(0..3));
+  let p_type = number_from_drain::<u8>(&mut bit_vec.drain(0..3));
 
   match p_type {
     4 => {
@@ -25,20 +61,55 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Option<Packet> {
         data_vec.append(&mut bits.collect::<Vec<char>>());
         next == '1'
       } {}
-      drain_rest(bit_vec, len);
-      Some(Packet {
-        version: version,
-        type_id: p_type,
-        value: Some(u32::from_str_radix(&data_vec.into_iter().collect::<String>(), 2).unwrap()),
-        sub_packets: None,
-      })
+      return Ok((
+        Packet {
+          version: version,
+          type_id: p_type,
+          value: Some(number_from_vec::<u64>(&data_vec)),
+          sub_packets: None,
+        },
+        len,
+      ));
     }
-    _ => None,
+    _ => {
+      let length_type = number_from_drain::<u8>(&mut bit_vec.drain(0..1));
+      let mut packets: Vec<Packet> = Vec::new();
+      match length_type {
+        0 => {
+          let mut length = number_from_drain::<usize>(&mut bit_vec.drain(0..15));
+          while length > 0 {
+            let result = parse_next_packet(bit_vec);
+            match result {
+              Ok(v) => {
+                let (packet, n_len) = v;
+                packets.push(packet);
+                length -= n_len;
+              }
+              Err(e) => return Err(e),
+            }
+          }
+          return Ok((
+            Packet {
+              version: version,
+              type_id: p_type,
+              value: None,
+              sub_packets: Some(packets),
+            },
+            len,
+          ));
+        }
+        1 => {
+          println!("packets")
+        }
+        _ => return Err("Invalid length type"),
+      }
+    }
   }
+  Err("Not yet implemented")
 }
 
 #[aoc_generator(day16)]
-pub fn input_generator(input: &str) -> Vec<char> {
+pub fn input_generator(input: &str) -> Vec<Packet> {
   let mut bit_vec: Vec<char> = input
     .chars()
     .map(|c| format!("{:04b}", usize::from_str_radix(&c.to_string(), 16).unwrap()))
@@ -47,21 +118,29 @@ pub fn input_generator(input: &str) -> Vec<char> {
     .chars()
     .collect();
 
-  println!("{:?}", bit_vec);
+  let mut packets = Vec::new();
 
-  let packet = parse_next_packet(&mut bit_vec);
-  println!("{:?}", packet);
+  while bit_vec.contains(&'1') {
+    let result = parse_next_packet(&mut bit_vec);
+    match result {
+      Ok(v) => {
+        let (packet, _) = v;
+        packets.push(packet);
+      }
+      Err(_e) => {}
+    }
+  }
 
-  return Vec::new();
+  return packets;
 }
 
 #[aoc(day16, part1)]
-pub fn solve_part1(input: &[char]) -> u32 {
+pub fn solve_part1(input: &Vec<Packet>) -> u32 {
   println!("{:?}", input);
   return 0;
 }
 
 #[aoc(day16, part2)]
-pub fn solve_part2(input: &[char]) -> u32 {
+pub fn solve_part2(input: &Vec<Packet>) -> u32 {
   return 0;
 }
