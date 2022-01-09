@@ -46,8 +46,7 @@ fn number_from_vec<T: FromStrRadix<T>>(vec: &Vec<char>) -> T {
 }
 
 fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'static str> {
-  //println!("{:?}", bit_vec);
-  let mut len = 6;
+  let mut packet_length = 6;
   let version = number_from_drain::<u8>(&mut bit_vec.drain(0..3));
   let p_type = number_from_drain::<u8>(&mut bit_vec.drain(0..3));
 
@@ -55,7 +54,7 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'stati
     4 => {
       let mut data_vec: Vec<char> = Vec::new();
       while {
-        len += 5;
+        packet_length += 5;
         let mut bits = bit_vec.drain(0..5);
         let next = bits.next().unwrap();
         data_vec.append(&mut bits.collect::<Vec<char>>());
@@ -68,22 +67,25 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'stati
           value: Some(number_from_vec::<u64>(&data_vec)),
           sub_packets: None,
         },
-        len,
+        packet_length,
       ));
-    }
+    },
     _ => {
       let length_type = number_from_drain::<u8>(&mut bit_vec.drain(0..1));
+      packet_length += 1;
       let mut packets: Vec<Packet> = Vec::new();
       match length_type {
         0 => {
-          let mut length = number_from_drain::<usize>(&mut bit_vec.drain(0..15));
-          while length > 0 {
+          let mut remaining_length = number_from_drain::<usize>(&mut bit_vec.drain(0..15));
+          packet_length += 15;
+          while remaining_length > 0 {
             let result = parse_next_packet(bit_vec);
             match result {
               Ok(v) => {
-                let (packet, n_len) = v;
+                let (packet, inner_length) = v;
                 packets.push(packet);
-                length -= n_len;
+                remaining_length -= inner_length;
+                packet_length += inner_length
               }
               Err(e) => return Err(e),
             }
@@ -95,17 +97,37 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'stati
               value: None,
               sub_packets: Some(packets),
             },
-            len,
+            packet_length,
           ));
         }
         1 => {
-          println!("packets")
+          let number_of_packets = number_from_drain::<usize>(&mut bit_vec.drain(0..11));
+          packet_length += 11;
+          for _ in 0..number_of_packets {
+            let result = parse_next_packet(bit_vec);
+            match result {
+              Ok(v) => {
+                let (packet, inner_length) = v;
+                packet_length += inner_length;
+                packets.push(packet);
+              }
+              Err(e) => return Err(e),
+            }
+          }
+          return Ok((
+            Packet {
+              version: version,
+              type_id: p_type,
+              value: None,
+              sub_packets: Some(packets),
+            },
+            packet_length,
+          ));
         }
         _ => return Err("Invalid length type"),
       }
     }
   }
-  Err("Not yet implemented")
 }
 
 #[aoc_generator(day16)]
