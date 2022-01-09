@@ -156,10 +156,25 @@ pub fn input_generator(input: &str) -> Vec<Packet> {
   return packets;
 }
 
+fn sum_version(packet: &Packet) -> usize {
+  let mut sum: usize = packet.version as usize;
+
+  if let Some(sub_packets) = &packet.sub_packets {
+    for sub_packet in sub_packets {
+      sum += sum_version(&sub_packet);
+    }
+  }
+
+  return sum;
+}
+
 #[aoc(day16, part1)]
-pub fn solve_part1(input: &Vec<Packet>) -> u32 {
-  println!("{:?}", input);
-  return 0;
+pub fn solve_part1(input: &Vec<Packet>) -> usize {
+  let mut sum = 0;
+  for packet in input {
+    sum += sum_version(packet);
+  }
+  return sum;
 }
 
 #[aoc(day16, part2)]
