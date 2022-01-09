@@ -32,8 +32,7 @@ impl FromStrRadix<u64> for u64 {
 #[derive(Debug)]
 pub struct Packet {
   version: u8,
-  type_id: u8,
-  value: Option<u64>,
+  value: u64,
   sub_packets: Option<Vec<Packet>>,
 }
 
@@ -63,17 +62,17 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'stati
       return Ok((
         Packet {
           version: version,
-          type_id: p_type,
-          value: Some(number_from_vec::<u64>(&data_vec)),
+          value: number_from_vec::<u64>(&data_vec),
           sub_packets: None,
         },
         packet_length,
       ));
-    },
+    }
     _ => {
       let length_type = number_from_drain::<u8>(&mut bit_vec.drain(0..1));
       packet_length += 1;
       let mut packets: Vec<Packet> = Vec::new();
+      let mut values: Vec<u64> = Vec::new();
       match length_type {
         0 => {
           let mut remaining_length = number_from_drain::<usize>(&mut bit_vec.drain(0..15));
@@ -83,6 +82,7 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'stati
             match result {
               Ok(v) => {
                 let (packet, inner_length) = v;
+                values.push(packet.value);
                 packets.push(packet);
                 remaining_length -= inner_length;
                 packet_length += inner_length
@@ -90,15 +90,6 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'stati
               Err(e) => return Err(e),
             }
           }
-          return Ok((
-            Packet {
-              version: version,
-              type_id: p_type,
-              value: None,
-              sub_packets: Some(packets),
-            },
-            packet_length,
-          ));
         }
         1 => {
           let number_of_packets = number_from_drain::<usize>(&mut bit_vec.drain(0..11));
@@ -109,23 +100,50 @@ fn parse_next_packet(bit_vec: &mut Vec<char>) -> Result<(Packet, usize), &'stati
               Ok(v) => {
                 let (packet, inner_length) = v;
                 packet_length += inner_length;
+                values.push(packet.value);
                 packets.push(packet);
               }
               Err(e) => return Err(e),
             }
           }
-          return Ok((
-            Packet {
-              version: version,
-              type_id: p_type,
-              value: None,
-              sub_packets: Some(packets),
-            },
-            packet_length,
-          ));
         }
         _ => return Err("Invalid length type"),
       }
+      return Ok((
+        Packet {
+          version: version,
+          value: match p_type {
+            0 => values.iter().sum(),
+            1 => values.iter().product(),
+            2 => *values.iter().min().unwrap(),
+            3 => *values.iter().max().unwrap(),
+            5 => {
+              if values[0] > values[1] {
+                1
+              } else {
+                0
+              }
+            }
+            6 => {
+              if values[0] < values[1] {
+                1
+              } else {
+                0
+              }
+            }
+            7 => {
+              if values[0] == values[1] {
+                1
+              } else {
+                0
+              }
+            }
+            _ => 0,
+          },
+          sub_packets: Some(packets),
+        },
+        packet_length,
+      ));
     }
   }
 }
@@ -178,6 +196,6 @@ pub fn solve_part1(input: &Vec<Packet>) -> usize {
 }
 
 #[aoc(day16, part2)]
-pub fn solve_part2(input: &Vec<Packet>) -> u32 {
-  return 0;
+pub fn solve_part2(input: &Vec<Packet>) -> u64 {
+  return input[0].value;
 }
